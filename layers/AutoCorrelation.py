@@ -48,56 +48,122 @@ class AutoCorrelation(nn.Module):
                          (tmp_corr[:, i].unsqueeze(1).unsqueeze(1).unsqueeze(1).repeat(1, head, channel, length))
         return delays_agg
 
+    # def time_delay_agg_inference(self, values, corr):
+    #     """
+    #     SpeedUp version of Autocorrelation (a batch-normalization style design)
+    #     This is for the inference phase.
+    #     """
+    #     batch = values.shape[0]
+    #     head = values.shape[1]
+    #     channel = values.shape[2]
+    #     length = values.shape[3]
+    #     # index init
+    #     init_index = torch.arange(length).unsqueeze(0).unsqueeze(0).unsqueeze(0).repeat(batch, head, channel, 1).cuda()
+    #     # find top k
+    #     top_k = int(self.factor * math.log(length))
+    #     mean_value = torch.mean(torch.mean(corr, dim=1), dim=1)
+    #     weights, delay = torch.topk(mean_value, top_k, dim=-1)
+    #     # update corr
+    #     tmp_corr = torch.softmax(weights, dim=-1)
+    #     # aggregation
+    #     tmp_values = values.repeat(1, 1, 1, 2)
+    #     delays_agg = torch.zeros_like(values).float()
+    #     for i in range(top_k):
+    #         tmp_delay = init_index + delay[:, i].unsqueeze(1).unsqueeze(1).unsqueeze(1).repeat(1, head, channel, length)
+    #         pattern = torch.gather(tmp_values, dim=-1, index=tmp_delay)
+    #         delays_agg = delays_agg + pattern * \
+    #                      (tmp_corr[:, i].unsqueeze(1).unsqueeze(1).unsqueeze(1).repeat(1, head, channel, length))
+    #     return delays_agg
+
+    # def time_delay_agg_full(self, values, corr):
+    #     """
+    #     Standard version of Autocorrelation
+    #     """
+    #     batch = values.shape[0]
+    #     head = values.shape[1]
+    #     channel = values.shape[2]
+    #     length = values.shape[3]
+    #     # index init
+    #     init_index = torch.arange(length).unsqueeze(0).unsqueeze(0).unsqueeze(0).repeat(batch, head, channel, 1).cuda()
+    #     # find top k
+    #     top_k = int(self.factor * math.log(length))
+    #     weights, delay = torch.topk(corr, top_k, dim=-1)
+    #     # update corr
+    #     tmp_corr = torch.softmax(weights, dim=-1)
+    #     # aggregation
+    #     tmp_values = values.repeat(1, 1, 1, 2)
+    #     delays_agg = torch.zeros_like(values).float()
+    #     for i in range(top_k):
+    #         tmp_delay = init_index + delay[..., i].unsqueeze(-1)
+    #         pattern = torch.gather(tmp_values, dim=-1, index=tmp_delay)
+    #         delays_agg = delays_agg + pattern * (tmp_corr[..., i].unsqueeze(-1))
+    #     return delays_agg
+    
     def time_delay_agg_inference(self, values, corr):
-        """
-        SpeedUp version of Autocorrelation (a batch-normalization style design)
-        This is for the inference phase.
-        """
+
+        device = values.device  # 🔧 get current tensor device
         batch = values.shape[0]
         head = values.shape[1]
         channel = values.shape[2]
         length = values.shape[3]
-        # index init
-        init_index = torch.arange(length).unsqueeze(0).unsqueeze(0).unsqueeze(0).repeat(batch, head, channel, 1).cuda()
+    
+        # index init (device-safe)
+        init_index = torch.arange(length, device=device)\
+            .unsqueeze(0).unsqueeze(0).unsqueeze(0)\
+            .repeat(batch, head, channel, 1)
+    
         # find top k
         top_k = int(self.factor * math.log(length))
         mean_value = torch.mean(torch.mean(corr, dim=1), dim=1)
         weights, delay = torch.topk(mean_value, top_k, dim=-1)
+    
         # update corr
         tmp_corr = torch.softmax(weights, dim=-1)
+    
         # aggregation
         tmp_values = values.repeat(1, 1, 1, 2)
-        delays_agg = torch.zeros_like(values).float()
+        delays_agg = torch.zeros_like(values, device=device).float()
+    
         for i in range(top_k):
-            tmp_delay = init_index + delay[:, i].unsqueeze(1).unsqueeze(1).unsqueeze(1).repeat(1, head, channel, length)
+            tmp_delay = init_index + delay[:, i].unsqueeze(1).unsqueeze(1).unsqueeze(1)\
+                .repeat(1, head, channel, length)
             pattern = torch.gather(tmp_values, dim=-1, index=tmp_delay)
             delays_agg = delays_agg + pattern * \
-                         (tmp_corr[:, i].unsqueeze(1).unsqueeze(1).unsqueeze(1).repeat(1, head, channel, length))
+                (tmp_corr[:, i].unsqueeze(1).unsqueeze(1).unsqueeze(1)
+                 .repeat(1, head, channel, length))
         return delays_agg
 
+
     def time_delay_agg_full(self, values, corr):
-        """
-        Standard version of Autocorrelation
-        """
+
+        device = values.device  # 🔧 ensure we use same device as input tensor
         batch = values.shape[0]
         head = values.shape[1]
         channel = values.shape[2]
         length = values.shape[3]
-        # index init
-        init_index = torch.arange(length).unsqueeze(0).unsqueeze(0).unsqueeze(0).repeat(batch, head, channel, 1).cuda()
+    
+        # index init (device-safe)
+        init_index = torch.arange(length, device=device)\
+            .unsqueeze(0).unsqueeze(0).unsqueeze(0)\
+            .repeat(batch, head, channel, 1)
+    
         # find top k
         top_k = int(self.factor * math.log(length))
         weights, delay = torch.topk(corr, top_k, dim=-1)
+    
         # update corr
         tmp_corr = torch.softmax(weights, dim=-1)
+    
         # aggregation
         tmp_values = values.repeat(1, 1, 1, 2)
-        delays_agg = torch.zeros_like(values).float()
+        delays_agg = torch.zeros_like(values, device=device).float()
+    
         for i in range(top_k):
             tmp_delay = init_index + delay[..., i].unsqueeze(-1)
             pattern = torch.gather(tmp_values, dim=-1, index=tmp_delay)
             delays_agg = delays_agg + pattern * (tmp_corr[..., i].unsqueeze(-1))
         return delays_agg
+
 
     def forward(self, queries, keys, values, attn_mask):
         B, L, H, E = queries.shape
