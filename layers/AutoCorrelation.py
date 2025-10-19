@@ -7,7 +7,6 @@ import math
 from math import sqrt
 import os
 
-
 class AutoCorrelation(nn.Module):
     """
     AutoCorrelation Mechanism with the following two phases:
