@@ -8,6 +8,8 @@ import time
 import random
 import numpy as np
 import os
+import csv
+import datetime
 
 from models import Autoformer, DLinear, TimeLLM
 from data_provider.data_factory import data_provider
@@ -225,6 +227,42 @@ def main():
             vali_loss, vali_mae_loss = vali(args, accelerator, model, vali_data, vali_loader, criterion, mae_metric)
             test_loss, test_mae_loss = vali(args, accelerator, model, test_data, test_loader, criterion, mae_metric)
             accelerator.print(f"Val Loss: {vali_loss:.6f}, Test Loss: {test_loss:.6f}, MAE: {test_mae_loss:.6f}")
+            
+            
+            # ====== TRAIN LOGGING BLOCK (append right after the accelerator.print(...) above) ======
+            
+            # compute epoch elapsed if not already available
+            # if you already track epoch_time above, you can use that; otherwise measure roughly here
+            # (we try to use epoch_time if defined; else fallback to time.time())
+            try:
+                epoch_elapsed = time.time() - epoch_time
+            except Exception:
+                epoch_elapsed = None
+            
+            log_path = os.path.join("train_log.csv")
+            file_exists = os.path.isfile(log_path)
+            
+            # device string
+            device_str = "cpu"
+            try:
+                if torch.cuda.is_available():
+                    device_str = "cuda"
+                elif torch.backends.mps.is_available():
+                    device_str = "mps"
+                else:
+                    device_str = "cpu"
+            except Exception:
+                device_str = "unknown"
+            
+            with open(log_path, mode="a", newline="") as f:
+                writer = csv.writer(f)
+                if not file_exists:
+                    writer.writerow(["timestamp","epoch","train_loss","val_loss","test_loss","mae_loss","epoch_time_s","device"])
+                writer.writerow([datetime.datetime.utcnow().isoformat(), epoch + 1, train_loss, vali_loss, test_loss, test_mae_loss, epoch_elapsed if epoch_elapsed is not None else "", device_str])
+            
+            accelerator.print(f"✅ Logged epoch {epoch+1} to {log_path} (epoch_time_s={epoch_elapsed})")
+            # ====== END TRAIN LOGGING BLOCK ======
+
 
             early_stopping(vali_loss, model, path)
             if early_stopping.early_stop:
